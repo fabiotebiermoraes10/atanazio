@@ -1,0 +1,2540 @@
+<!doctype html>
+<html lang="pt-BR" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema Escolar Online</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="/_sdk/data_sdk.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .sidebar-item:hover { background: rgba(255,255,255,0.1); }
+    .sidebar-item.active { background: rgba(255,255,255,0.15); border-left: 3px solid #fbbf24; }
+    .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 40px rgba(0,0,0,0.12); }
+    .input-field:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(30,64,175,0.1); }
+    .btn-primary { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); }
+    .btn-primary:hover { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); }
+    .table-row:hover { background: #f8fafc; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade { animation: fadeIn 0.3s ease-out; }
+    .toast { animation: slideIn 0.3s ease-out; }
+    @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  </style>
+  <style>body { box-sizing: border-box; }</style>
+ </head>
+ <body class="h-full bg-slate-100 overflow-auto">
+  <div id="app" class="h-full w-full"></div>
+  <script>
+    // ==================== CONFIG ====================
+    const defaultConfig = {
+      school_name: "Escola Estadual Indígena de Tempo Integral Atanazio Mota",
+      school_address: "Com. Lago grande",
+      school_phone: "(95) 984087036"
+      declaration_header: "DECLARAÇÃO DE MATRÍCULA",
+      certificate_header: "CERTIFICADO DE CONCLUSÃO",
+      history_header: "HISTÓRICO ESCOLAR",
+      primary_color: "#1e40af",
+      secondary_color: "#f8fafc",
+      text_color: "#1e293b",
+      accent_color: "#fbbf24",
+      surface_color: "#ffffff"
+    };
+
+    let config = { ...defaultConfig };
+    let allData = [];
+    let currentUser = null;
+    let currentView = 'login';
+    let selectedStudent = null;
+    let editingItem = null;
+
+    // ==================== SUBJECTS ====================
+    const SUBJECTS = [
+      'Português', 'Matemática', 'História', 'Geografia', 
+      'Ciências', 'Física', 'Química', 'Biologia',
+      'Inglês', 'Educação Física', 'Artes', 'Filosofia'
+    ];
+
+    const CLASSES = [
+      '6º Ano', '7º Ano',
+      '8º Ano, '9º Ano'
+      '1º Médio' '2º Médio',
+      '3º Médio', '6º EJA', '7º EJA',
+      '8º EJA', '9º EJA', '1º Médio EJA', '2º Médio EJA',
+      '3º Médio EJA'
+    ];
+
+    const BIMESTERS = ['1º Bimestre', '2º Bimestre', '3º Bimestre', '4º Bimestre'];
+
+    // ==================== HELPERS ====================
+    function getUsers() { return allData.filter(d => d.type === 'user'); }
+    function getStudents() { return allData.filter(d => d.type === 'student'); }
+    function getGrades() { return allData.filter(d => d.type === 'grade'); }
+    function getAttendance() { return allData.filter(d => d.type === 'attendance'); }
+    function getDocuments() { return allData.filter(d => d.type === 'document'); }
+
+    function getStudentGrades(studentId) {
+      return getGrades().filter(g => g.grade_student_id === studentId);
+    }
+
+    function getStudentAttendance(studentId) {
+      return getAttendance().filter(a => a.attendance_student_id === studentId);
+    }
+
+    function getStudentDocuments(studentId) {
+      return getDocuments().filter(d => d.doc_student_id === studentId);
+    }
+
+    function calculateAverage(grades) {
+      if (!grades.length) return 0;
+      const sum = grades.reduce((acc, g) => acc + (g.grade_value || 0), 0);
+      return (sum / grades.length).toFixed(1);
+    }
+
+    function calculateAttendanceRate(attendance) {
+      if (!attendance.length) return 100;
+      const present = attendance.filter(a => a.attendance_present).length;
+      return ((present / attendance.length) * 100).toFixed(1);
+    }
+
+    function showToast(message, type = 'success') {
+      const toast = document.createElement('div');
+      toast.className = `toast fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white font-medium`;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    function downloadAsWord(html, filename) {
+      const template = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; margin: 40px; }
+              h1, h2, h3 { text-align: center; }
+              table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+              table, th, td { border: 1px solid #000; padding: 8px; }
+              th { background-color: #f0f0f0; }
+              .signature { margin-top: 40px; display: flex; gap: 60px; }
+              .signature-line { text-align: center; }
+            </style>
+          </head>
+          <body>${html}</body>
+        </html>
+      `;
+
+      const blob = new Blob([template], { type: 'application/msword' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename + '.doc';
+      link.click();
+      window.URL.revokeObjectURL(url);
+      showToast('Documento baixado com sucesso!');
+    }
+
+    function downloadAsPDF(html, filename) {
+      const template = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; margin: 40px; }
+              h1, h2, h3 { text-align: center; }
+              table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+              table, th, td { border: 1px solid #000; padding: 8px; }
+              th { background-color: #f0f0f0; }
+            </style>
+          </head>
+          <body>${html}</body>
+        </html>
+      `;
+
+      const printWindow = window.open('', '', 'width=800,height=600');
+      printWindow.document.write(template);
+      printWindow.document.close();
+      setTimeout(() => printWindow.print(), 250);
+    }
+
+    // ==================== RENDER FUNCTIONS ====================
+    function render() {
+      const app = document.getElementById('app');
+      
+      if (!currentUser) {
+        app.innerHTML = renderLoginPage();
+      } else if (currentUser.role === 'admin') {
+        app.innerHTML = renderAdminDashboard();
+      } else {
+        app.innerHTML = renderTeacherDashboard();
+      }
+
+      attachEventListeners();
+    }
+
+    function renderLoginPage() {
+      return `
+        <div class="min-h-full w-full flex items-center justify-center p-4" style="background: linear-gradient(135deg, ${config.primary_color} 0%, #3b82f6 50%, #8b5cf6 100%);">
+          <div class="w-full max-w-md animate-fade">
+            <div class="text-center mb-8">
+              <div class="w-20 h-20 mx-auto mb-4 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center">
+                <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                </svg>
+              </div>
+              <h1 id="school-name-display" class="text-3xl font-bold text-white mb-2">${config.school_name}</h1>
+              <p id="school-address-display" class="text-white/80 text-sm">${config.school_address}</p>
+            </div>
+            
+            <div class="bg-white rounded-2xl shadow-2xl p-8">
+              <h2 class="text-2xl font-bold text-center mb-6" style="color: ${config.text_color}">Acesso ao Sistema</h2>
+              
+              <form id="login-form" class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium mb-2" style="color: ${config.text_color}">Email</label>
+                  <input type="email" id="login-email" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200 transition-all" placeholder="seu@email.com" required>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2" style="color: ${config.text_color}">Senha</label>
+                  <input type="password" id="login-password" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200 transition-all" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="btn-primary w-full py-3 rounded-lg text-white font-semibold transition-all hover:shadow-lg">
+                  Entrar
+                </button>
+              </form>
+              
+              <div class="mt-6 p-4 bg-slate-50 rounded-lg">
+                <p class="text-sm text-slate-600 text-center mb-2">Primeiro acesso? Configure o administrador:</p>
+                <button id="setup-admin-btn" class="w-full py-2 px-4 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-blue-400 hover:text-blue-600 transition-all text-sm">
+                  Configurar Administrador
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="setup-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-2xl p-6 w-full max-w-md animate-fade">
+            <h3 class="text-xl font-bold mb-4" style="color: ${config.text_color}">Configurar Administrador</h3>
+            <form id="setup-form" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium mb-2">Nome Completo</label>
+                <input type="text" id="setup-name" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Email</label>
+                <input type="email" id="setup-email" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Senha</label>
+                <input type="password" id="setup-password" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+              </div>
+              <div class="flex gap-3">
+                <button type="button" id="cancel-setup" class="flex-1 py-3 rounded-lg border-2 border-slate-200 font-medium hover:bg-slate-50">Cancelar</button>
+                <button type="submit" class="flex-1 btn-primary py-3 rounded-lg text-white font-semibold">Criar Admin</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderAdminDashboard() {
+      const students = getStudents();
+      const teachers = getUsers().filter(u => u.role === 'teacher');
+      const grades = getGrades();
+      
+      return `
+        <div class="flex h-full">
+          <!-- Sidebar -->
+          <aside class="w-64 flex-shrink-0 text-white" style="background: ${config.primary_color}">
+            <div class="p-6">
+              <div class="flex items-center gap-3 mb-2">
+                <div class="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h1 id="sidebar-school-name" class="font-bold text-lg leading-tight">${config.school_name}</h1>
+                  <span class="text-xs text-white/70">Administrador</span>
+                </div>
+              </div>
+            </div>
+            
+            <nav class="px-3 space-y-1">
+              <button data-view="dashboard" class="sidebar-item ${currentView === 'dashboard' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                Dashboard
+              </button>
+              <button data-view="students" class="sidebar-item ${currentView === 'students' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                Alunos
+              </button>
+              <button data-view="teachers" class="sidebar-item ${currentView === 'teachers' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                Professores
+              </button>
+              <button data-view="classes" class="sidebar-item ${currentView === 'classes' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                Turmas
+              </button>
+              <button data-view="grades" class="sidebar-item ${currentView === 'grades' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                Notas
+              </button>
+              <button data-view="reports" class="sidebar-item ${currentView === 'reports' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                Relatórios
+              </button>
+            </nav>
+            
+            <div class="absolute bottom-0 left-0 w-64 p-4">
+              <button id="logout-btn" class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white/10 hover:bg-white/20 transition-all">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                Sair
+              </button>
+            </div>
+          </aside>
+
+          <!-- Main Content -->
+          <main class="flex-1 overflow-auto p-6" style="background: ${config.secondary_color}">
+            ${renderAdminContent()}
+          </main>
+        </div>
+      `;
+    }
+
+    function renderAdminContent() {
+      switch(currentView) {
+        case 'dashboard': return renderDashboardContent();
+        case 'students': return renderStudentsContent();
+        case 'teachers': return renderTeachersContent();
+        case 'classes': return renderClassesContent();
+        case 'grades': return renderGradesContent();
+        case 'reports': return renderReportsContent();
+        case 'student-detail': return renderStudentDetail();
+        default: return renderDashboardContent();
+      }
+    }
+
+    function renderDashboardContent() {
+      const students = getStudents();
+      const teachers = getUsers().filter(u => u.role === 'teacher');
+      const grades = getGrades();
+      const avgGrade = calculateAverage(grades);
+      
+      return `
+        <div class="animate-fade">
+          <div class="mb-8">
+            <h2 class="text-2xl font-bold" style="color: ${config.text_color}">Painel de Controle</h2>
+            <p class="text-slate-500">Bem-vindo ao sistema de gestão escolar</p>
+          </div>
+
+          <!-- Stats Cards -->
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="card-hover bg-white rounded-xl p-6 shadow-sm transition-all" style="border-left: 4px solid ${config.primary_color}">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-slate-500 text-sm mb-1">Total de Alunos</p>
+                  <p class="text-3xl font-bold" style="color: ${config.text_color}">${students.length}</p>
+                </div>
+                <div class="w-12 h-12 rounded-lg flex items-center justify-center" style="background: ${config.primary_color}20">
+                  <svg class="w-6 h-6" style="color: ${config.primary_color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-hover bg-white rounded-xl p-6 shadow-sm transition-all" style="border-left: 4px solid #10b981">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-slate-500 text-sm mb-1">Professores</p>
+                  <p class="text-3xl font-bold" style="color: ${config.text_color}">${teachers.length}</p>
+                </div>
+                <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-emerald-100">
+                  <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-hover bg-white rounded-xl p-6 shadow-sm transition-all" style="border-left: 4px solid ${config.accent_color}">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-slate-500 text-sm mb-1">Média Geral</p>
+                  <p class="text-3xl font-bold" style="color: ${config.text_color}">${avgGrade}</p>
+                </div>
+                <div class="w-12 h-12 rounded-lg flex items-center justify-center" style="background: ${config.accent_color}30">
+                  <svg class="w-6 h-6" style="color: ${config.accent_color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-hover bg-white rounded-xl p-6 shadow-sm transition-all" style="border-left: 4px solid #8b5cf6">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-slate-500 text-sm mb-1">Turmas</p>
+                  <p class="text-3xl font-bold" style="color: ${config.text_color}">${CLASSES.length}</p>
+                </div>
+                <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-violet-100">
+                  <svg class="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent Students -->
+          <div class="bg-white rounded-xl shadow-sm p-6">
+            <div class="flex items-center justify-between mb-6">
+              <h3 class="text-lg font-bold" style="color: ${config.text_color}">Alunos Recentes</h3>
+              <button data-view="students" class="text-sm font-medium hover:underline" style="color: ${config.primary_color}">Ver todos →</button>
+            </div>
+            
+            ${students.length === 0 ? `
+              <div class="text-center py-12">
+                <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center">
+                  <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                </div>
+                <p class="text-slate-500">Nenhum aluno cadastrado ainda</p>
+                <button data-view="students" class="mt-4 btn-primary px-6 py-2 rounded-lg text-white text-sm font-medium">Cadastrar Aluno</button>
+              </div>
+            ` : `
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead>
+                    <tr class="border-b border-slate-200">
+                      <th class="text-left py-3 px-4 text-sm font-medium text-slate-500">Aluno</th>
+                      <th class="text-left py-3 px-4 text-sm font-medium text-slate-500">Turma</th>
+                      <th class="text-left py-3 px-4 text-sm font-medium text-slate-500">Status</th>
+                      <th class="text-right py-3 px-4 text-sm font-medium text-slate-500">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${students.slice(0, 5).map(s => `
+                      <tr class="table-row border-b border-slate-100 transition-colors">
+                        <td class="py-3 px-4">
+                          <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center font-medium text-white" style="background: ${config.primary_color}">
+                              ${s.student_name ? s.student_name.charAt(0).toUpperCase() : '?'}
+                            </div>
+                            <span class="font-medium" style="color: ${config.text_color}">${s.student_name || 'Sem nome'}</span>
+                          </div>
+                        </td>
+                        <td class="py-3 px-4 text-slate-600">${s.student_class || '-'}</td>
+                        <td class="py-3 px-4">
+                          <span class="px-3 py-1 rounded-full text-xs font-medium ${s.student_status === 'Ativo' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}">
+                            ${s.student_status || 'Ativo'}
+                          </span>
+                        </td>
+                        <td class="py-3 px-4 text-right">
+                          <button data-student-id="${s.__backendId}" class="view-student-btn text-sm font-medium hover:underline" style="color: ${config.primary_color}">Ver Detalhes</button>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderStudentsContent() {
+      const students = getStudents();
+      
+      return `
+        <div class="animate-fade">
+          <div class="flex items-center justify-between mb-8">
+            <div>
+              <h2 class="text-2xl font-bold" style="color: ${config.text_color}">Alunos</h2>
+              <p class="text-slate-500">Gerencie os alunos da escola</p>
+            </div>
+            <button id="add-student-btn" class="btn-primary px-6 py-3 rounded-lg text-white font-medium flex items-center gap-2 hover:shadow-lg transition-all">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+              Novo Aluno
+            </button>
+          </div>
+
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+            ${students.length === 0 ? `
+              <div class="text-center py-16">
+                <div class="w-20 h-20 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center">
+                  <svg class="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                </div>
+                <h3 class="text-lg font-medium mb-2" style="color: ${config.text_color}">Nenhum aluno cadastrado</h3>
+                <p class="text-slate-500 mb-4">Comece cadastrando seu primeiro aluno</p>
+                <button id="add-student-btn-empty" class="btn-primary px-6 py-3 rounded-lg text-white font-medium">Cadastrar Primeiro Aluno</button>
+              </div>
+            ` : `
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-slate-50">
+                    <tr>
+                      <th class="text-left py-4 px-6 text-sm font-medium text-slate-500">Aluno</th>
+                      <th class="text-left py-4 px-6 text-sm font-medium text-slate-500">Turma</th>
+                      <th class="text-left py-4 px-6 text-sm font-medium text-slate-500">Média</th>
+                      <th class="text-left py-4 px-6 text-sm font-medium text-slate-500">Frequência</th>
+                      <th class="text-left py-4 px-6 text-sm font-medium text-slate-500">Status</th>
+                      <th class="text-right py-4 px-6 text-sm font-medium text-slate-500">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${students.map(s => {
+                      const grades = getStudentGrades(s.__backendId);
+                      const attendance = getStudentAttendance(s.__backendId);
+                      const avg = calculateAverage(grades);
+                      const freq = calculateAttendanceRate(attendance);
+                      return `
+                        <tr class="table-row border-b border-slate-100 transition-colors">
+                          <td class="py-4 px-6">
+                            <div class="flex items-center gap-3">
+                              <div class="w-10 h-10 rounded-full flex items-center justify-center font-medium text-white" style="background: ${config.primary_color}">
+                                ${s.student_name ? s.student_name.charAt(0).toUpperCase() : '?'}
+                              </div>
+                              <div>
+                                <p class="font-medium" style="color: ${config.text_color}">${s.student_name || 'Sem nome'}</p>
+                                <p class="text-sm text-slate-500">${s.student_cpf || ''}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td class="py-4 px-6 text-slate-600">${s.student_class || '-'}</td>
+                          <td class="py-4 px-6">
+                            <span class="font-medium ${parseFloat(avg) >= 7 ? 'text-emerald-600' : parseFloat(avg) >= 5 ? 'text-amber-600' : 'text-red-600'}">${avg}</span>
+                          </td>
+                          <td class="py-4 px-6">
+                            <span class="font-medium ${parseFloat(freq) >= 75 ? 'text-emerald-600' : 'text-red-600'}">${freq}%</span>
+                          </td>
+                          <td class="py-4 px-6">
+                            <span class="px-3 py-1 rounded-full text-xs font-medium ${s.student_status === 'Ativo' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}">
+                              ${s.student_status || 'Ativo'}
+                            </span>
+                          </td>
+                          <td class="py-4 px-6 text-right">
+                            <div class="flex items-center justify-end gap-2">
+                              <button data-student-id="${s.__backendId}" class="view-student-btn p-2 rounded-lg hover:bg-slate-100 transition-colors" title="Ver detalhes">
+                                <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                              </button>
+                              <button data-edit-student="${s.__backendId}" class="edit-student-btn p-2 rounded-lg hover:bg-slate-100 transition-colors" title="Editar">
+                                <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                              </button>
+                              <button data-delete-student="${s.__backendId}" class="delete-student-btn p-2 rounded-lg hover:bg-red-100 transition-colors" title="Excluir">
+                                <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- Add/Edit Student Modal -->
+        <div id="student-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-auto">
+          <div class="bg-white rounded-2xl p-6 w-full max-w-2xl my-8 animate-fade">
+            <h3 id="student-modal-title" class="text-xl font-bold mb-6" style="color: ${config.text_color}">Novo Aluno</h3>
+            <form id="student-form" class="space-y-4">
+              <input type="hidden" id="student-edit-id">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="md:col-span-2">
+                  <label class="block text-sm font-medium mb-2">Nome Completo *</label>
+                  <input type="text" id="student-name" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Turma *</label>
+                  <select id="student-class" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+                    <option value="">Selecione...</option>
+                    ${CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Data de Nascimento</label>
+                  <input type="date" id="student-birth" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">CPF</label>
+                  <input type="text" id="student-cpf" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" placeholder="000.000.000-00">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Telefone</label>
+                  <input type="tel" id="student-phone" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" placeholder="(00) 00000-0000">
+                </div>
+                <div class="md:col-span-2">
+                  <label class="block text-sm font-medium mb-2">Endereço</label>
+                  <input type="text" id="student-address" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Status</label>
+                  <select id="student-status" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200">
+                    <option value="Ativo">Ativo</option>
+                    <option value="Inativo">Inativo</option>
+                    <option value="Transferido">Transferido</option>
+                  </select>
+                </div>
+              </div>
+              <div class="flex gap-3 pt-4">
+                <button type="button" id="cancel-student" class="flex-1 py-3 rounded-lg border-2 border-slate-200 font-medium hover:bg-slate-50">Cancelar</button>
+                <button type="submit" class="flex-1 btn-primary py-3 rounded-lg text-white font-semibold">Salvar Aluno</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderStudentDetail() {
+      if (!selectedStudent) {
+        currentView = 'students';
+        return renderStudentsContent();
+      }
+
+      const student = getStudents().find(s => s.__backendId === selectedStudent);
+      if (!student) {
+        currentView = 'students';
+        return renderStudentsContent();
+      }
+
+      const grades = getStudentGrades(student.__backendId);
+      const attendance = getStudentAttendance(student.__backendId);
+      const documents = getStudentDocuments(student.__backendId);
+      const avgGrade = calculateAverage(grades);
+      const freqRate = calculateAttendanceRate(attendance);
+
+      // Group grades by subject and bimester
+      const gradesBySubject = {};
+      SUBJECTS.forEach(subject => {
+        gradesBySubject[subject] = {};
+        BIMESTERS.forEach(bim => {
+          const grade = grades.find(g => g.grade_subject === subject && g.grade_bimester === bim);
+          gradesBySubject[subject][bim] = grade ? grade.grade_value : '-';
+        });
+      });
+
+      return `
+        <div class="animate-fade">
+          <button id="back-to-students" class="flex items-center gap-2 text-slate-600 hover:text-slate-800 mb-6">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+            Voltar para Alunos
+          </button>
+
+          <!-- Student Header -->
+          <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <div class="flex items-start gap-6">
+              <div class="w-24 h-24 rounded-xl flex items-center justify-center text-3xl font-bold text-white" style="background: ${config.primary_color}">
+                ${student.student_name ? student.student_name.charAt(0).toUpperCase() : '?'}
+              </div>
+              <div class="flex-1">
+                <div class="flex items-center gap-3 mb-2">
+                  <h2 class="text-2xl font-bold" style="color: ${config.text_color}">${student.student_name || 'Sem nome'}</h2>
+                  <span class="px-3 py-1 rounded-full text-sm font-medium ${student.student_status === 'Ativo' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}">
+                    ${student.student_status || 'Ativo'}
+                  </span>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p class="text-slate-500">Turma</p>
+                    <p class="font-medium" style="color: ${config.text_color}">${student.student_class || '-'}</p>
+                  </div>
+                  <div>
+                    <p class="text-slate-500">Nascimento</p>
+                    <p class="font-medium" style="color: ${config.text_color}">${student.student_birth || '-'}</p>
+                  </div>
+                  <div>
+                    <p class="text-slate-500">CPF</p>
+                    <p class="font-medium" style="color: ${config.text_color}">${student.student_cpf || '-'}</p>
+                  </div>
+                  <div>
+                    <p class="text-slate-500">Telefone</p>
+                    <p class="font-medium" style="color: ${config.text_color}">${student.student_phone || '-'}</p>
+                  </div>
+                </div>
+              </div>
+              <div class="flex gap-4">
+                <div class="text-center p-4 rounded-xl" style="background: ${config.primary_color}10">
+                  <p class="text-sm text-slate-500 mb-1">Média Geral</p>
+                  <p class="text-3xl font-bold ${parseFloat(avgGrade) >= 7 ? 'text-emerald-600' : parseFloat(avgGrade) >= 5 ? 'text-amber-600' : 'text-red-600'}">${avgGrade}</p>
+                </div>
+                <div class="text-center p-4 rounded-xl" style="background: ${config.primary_color}10">
+                  <p class="text-sm text-slate-500 mb-1">Frequência</p>
+                  <p class="text-3xl font-bold ${parseFloat(freqRate) >= 75 ? 'text-emerald-600' : 'text-red-600'}">${freqRate}%</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div class="flex border-b border-slate-200">
+              <button data-tab="grades" class="student-tab active flex-1 py-4 px-6 text-center font-medium border-b-2 border-blue-600 text-blue-600">Notas</button>
+              <button data-tab="attendance" class="student-tab flex-1 py-4 px-6 text-center font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700">Frequência</button>
+              <button data-tab="documents" class="student-tab flex-1 py-4 px-6 text-center font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700">Documentos</button>
+            </div>
+
+            <!-- Grades Tab -->
+            <div id="tab-grades" class="p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold" style="color: ${config.text_color}">Boletim Escolar</h3>
+                <button id="add-grade-btn" class="btn-primary px-4 py-2 rounded-lg text-white text-sm font-medium flex items-center gap-2">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                  Lançar Nota
+                </button>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-slate-50">
+                    <tr>
+                      <th class="text-left py-3 px-4 text-sm font-medium text-slate-500">Disciplina</th>
+                      ${BIMESTERS.map(b => `<th class="text-center py-3 px-4 text-sm font-medium text-slate-500">${b}</th>`).join('')}
+                      <th class="text-center py-3 px-4 text-sm font-medium text-slate-500">Média</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${SUBJECTS.map(subject => {
+                      const subjectGrades = Object.values(gradesBySubject[subject]).filter(g => g !== '-');
+                      const subjectAvg = subjectGrades.length > 0 ? (subjectGrades.reduce((a, b) => a + b, 0) / subjectGrades.length).toFixed(1) : '-';
+                      return `
+                        <tr class="border-b border-slate-100">
+                          <td class="py-3 px-4 font-medium" style="color: ${config.text_color}">${subject}</td>
+                          ${BIMESTERS.map(bim => {
+                            const val = gradesBySubject[subject][bim];
+                            const colorClass = val === '-' ? 'text-slate-400' : parseFloat(val) >= 7 ? 'text-emerald-600' : parseFloat(val) >= 5 ? 'text-amber-600' : 'text-red-600';
+                            return `<td class="py-3 px-4 text-center font-medium ${colorClass}">${val}</td>`;
+                          }).join('')}
+                          <td class="py-3 px-4 text-center font-bold ${subjectAvg === '-' ? 'text-slate-400' : parseFloat(subjectAvg) >= 7 ? 'text-emerald-600' : parseFloat(subjectAvg) >= 5 ? 'text-amber-600' : 'text-red-600'}">${subjectAvg}</td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Attendance Tab -->
+            <div id="tab-attendance" class="p-6 hidden">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold" style="color: ${config.text_color}">Registro de Frequência</h3>
+                <button id="add-attendance-btn" class="btn-primary px-4 py-2 rounded-lg text-white text-sm font-medium flex items-center gap-2">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                  Registrar Frequência
+                </button>
+              </div>
+              ${attendance.length === 0 ? `
+                <div class="text-center py-12">
+                  <p class="text-slate-500">Nenhum registro de frequência</p>
+                </div>
+              ` : `
+                <div class="overflow-x-auto">
+                  <table class="w-full">
+                    <thead class="bg-slate-50">
+                      <tr>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-slate-500">Data</th>
+                        <th class="text-left py-3 px-4 text-sm font-medium text-slate-500">Disciplina</th>
+                        <th class="text-center py-3 px-4 text-sm font-medium text-slate-500">Presença</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${attendance.map(a => `
+                        <tr class="border-b border-slate-100">
+                          <td class="py-3 px-4" style="color: ${config.text_color}">${a.attendance_date}</td>
+                          <td class="py-3 px-4" style="color: ${config.text_color}">${a.attendance_subject}</td>
+                          <td class="py-3 px-4 text-center">
+                            <span class="px-3 py-1 rounded-full text-xs font-medium ${a.attendance_present ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}">
+                              ${a.attendance_present ? 'Presente' : 'Ausente'}
+                            </span>
+                          </td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `}
+            </div>
+
+            <!-- Documents Tab -->
+            <div id="tab-documents" class="p-6 hidden">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold" style="color: ${config.text_color}">Documentos</h3>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <button id="gen-declaration" class="p-4 border-2 border-dashed border-slate-300 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all text-left">
+                  <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center mb-3">
+                    <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                  </div>
+                  <h4 class="font-medium" style="color: ${config.text_color}">Declaração</h4>
+                  <p class="text-sm text-slate-500">Gerar e baixar</p>
+                </button>
+                <button id="gen-history" class="p-4 border-2 border-dashed border-slate-300 rounded-xl hover:border-emerald-400 hover:bg-emerald-50 transition-all text-left">
+                  <div class="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center mb-3">
+                    <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                  </div>
+                  <h4 class="font-medium" style="color: ${config.text_color}">Histórico</h4>
+                  <p class="text-sm text-slate-500">Gerar e baixar</p>
+                </button>
+                <button id="gen-certificate" class="p-4 border-2 border-dashed border-slate-300 rounded-xl hover:border-amber-400 hover:bg-amber-50 transition-all text-left">
+                  <div class="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center mb-3">
+                    <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  </div>
+                  <h4 class="font-medium" style="color: ${config.text_color}">Certificado</h4>
+                  <p class="text-sm text-slate-500">Gerar e baixar</p>
+                </button>
+              </div>
+
+              <!-- Download Options Modal -->
+              <div id="download-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-2xl p-6 w-full max-w-md animate-fade">
+                  <h3 id="download-title" class="text-xl font-bold mb-6" style="color: ${config.text_color}">Baixar Documento</h3>
+                  <p class="text-slate-600 mb-6">Escolha o formato desejado:</p>
+                  <div class="space-y-3">
+                    <button id="download-word" class="w-full py-3 px-4 rounded-lg border-2 border-blue-500 text-blue-600 font-medium hover:bg-blue-50 transition-all flex items-center justify-center gap-2">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                      Baixar Word
+                    </button>
+                    <button id="download-pdf" class="w-full py-3 px-4 rounded-lg border-2 border-red-500 text-red-600 font-medium hover:bg-red-50 transition-all flex items-center justify-center gap-2">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                      Baixar PDF
+                    </button>
+                    <button id="close-download" class="w-full py-3 px-4 rounded-lg border-2 border-slate-300 text-slate-600 font-medium hover:bg-slate-50 transition-all">
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            
+          </div>
+        </div>
+
+        <!-- Grade Modal -->
+        <div id="grade-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-2xl p-6 w-full max-w-md animate-fade">
+            <h3 class="text-xl font-bold mb-6" style="color: ${config.text_color}">Lançar Nota</h3>
+            <form id="grade-form" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium mb-2">Disciplina</label>
+                <select id="grade-subject" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+                  <option value="">Selecione...</option>
+                  ${SUBJECTS.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Bimestre</label>
+                <select id="grade-bimester" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+                  <option value="">Selecione...</option>
+                  ${BIMESTERS.map(b => `<option value="${b}">${b}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Nota (0-10)</label>
+                <input type="number" id="grade-value" min="0" max="10" step="0.1" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+              </div>
+              <div class="flex gap-3 pt-4">
+                <button type="button" id="cancel-grade" class="flex-1 py-3 rounded-lg border-2 border-slate-200 font-medium hover:bg-slate-50">Cancelar</button>
+                <button type="submit" class="flex-1 btn-primary py-3 rounded-lg text-white font-semibold">Salvar Nota</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Attendance Modal -->
+        <div id="attendance-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-2xl p-6 w-full max-w-md animate-fade">
+            <h3 class="text-xl font-bold mb-6" style="color: ${config.text_color}">Registrar Frequência</h3>
+            <form id="attendance-form" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium mb-2">Data</label>
+                <input type="date" id="attendance-date" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Disciplina</label>
+                <select id="attendance-subject" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+                  <option value="">Selecione...</option>
+                  ${SUBJECTS.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Presença</label>
+                <select id="attendance-present" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+                  <option value="true">Presente</option>
+                  <option value="false">Ausente</option>
+                </select>
+              </div>
+              <div class="flex gap-3 pt-4">
+                <button type="button" id="cancel-attendance" class="flex-1 py-3 rounded-lg border-2 border-slate-200 font-medium hover:bg-slate-50">Cancelar</button>
+                <button type="submit" class="flex-1 btn-primary py-3 rounded-lg text-white font-semibold">Salvar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTeachersContent() {
+      const teachers = getUsers().filter(u => u.role === 'teacher');
+      
+      return `
+        <div class="animate-fade">
+          <div class="flex items-center justify-between mb-8">
+            <div>
+              <h2 class="text-2xl font-bold" style="color: ${config.text_color}">Professores</h2>
+              <p class="text-slate-500">Gerencie os professores e suas disciplinas</p>
+            </div>
+            <button id="add-teacher-btn" class="btn-primary px-6 py-3 rounded-lg text-white font-medium flex items-center gap-2 hover:shadow-lg transition-all">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+              Novo Professor
+            </button>
+          </div>
+
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+            ${teachers.length === 0 ? `
+              <div class="text-center py-16">
+                <div class="w-20 h-20 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center">
+                  <svg class="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                </div>
+                <h3 class="text-lg font-medium mb-2" style="color: ${config.text_color}">Nenhum professor cadastrado</h3>
+                <p class="text-slate-500 mb-4">Comece cadastrando seu primeiro professor</p>
+              </div>
+            ` : `
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+                ${teachers.map(t => `
+                  <div class="card-hover bg-slate-50 rounded-xl p-6 transition-all">
+                    <div class="flex items-center gap-4 mb-4">
+                      <div class="w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold text-white" style="background: ${config.primary_color}">
+                        ${t.name ? t.name.charAt(0).toUpperCase() : '?'}
+                      </div>
+                      <div>
+                        <h4 class="font-bold" style="color: ${config.text_color}">${t.name || 'Sem nome'}</h4>
+                        <p class="text-sm text-slate-500">${t.email}</p>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2 mb-4">
+                      <span class="px-3 py-1 rounded-full text-sm font-medium" style="background: ${config.primary_color}20; color: ${config.primary_color}">
+                        ${t.subject || 'Sem disciplina'}
+                      </span>
+                    </div>
+                    <div class="flex gap-2">
+                      <button data-edit-teacher="${t.__backendId}" class="flex-1 py-2 rounded-lg border border-slate-300 text-sm font-medium hover:bg-white transition-colors">Editar</button>
+                      <button data-delete-teacher="${t.__backendId}" class="py-2 px-4 rounded-lg border border-red-300 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                      </button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- Teacher Modal -->
+        <div id="teacher-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-2xl p-6 w-full max-w-md animate-fade">
+            <h3 id="teacher-modal-title" class="text-xl font-bold mb-6" style="color: ${config.text_color}">Novo Professor</h3>
+            <form id="teacher-form" class="space-y-4">
+              <input type="hidden" id="teacher-edit-id">
+              <div>
+                <label class="block text-sm font-medium mb-2">Nome Completo *</label>
+                <input type="text" id="teacher-name" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Email *</label>
+                <input type="email" id="teacher-email" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Senha *</label>
+                <input type="password" id="teacher-password" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Disciplina *</label>
+                <select id="teacher-subject" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200" required>
+                  <option value="">Selecione...</option>
+                  ${SUBJECTS.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </div>
+              <div class="flex gap-3 pt-4">
+                <button type="button" id="cancel-teacher" class="flex-1 py-3 rounded-lg border-2 border-slate-200 font-medium hover:bg-slate-50">Cancelar</button>
+                <button type="submit" class="flex-1 btn-primary py-3 rounded-lg text-white font-semibold">Salvar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderClassesContent() {
+      const students = getStudents();
+      
+      return `
+        <div class="animate-fade">
+          <div class="mb-8">
+            <h2 class="text-2xl font-bold" style="color: ${config.text_color}">Turmas</h2>
+            <p class="text-slate-500">Visualize e gerencie as turmas da escola</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            ${CLASSES.map(className => {
+              const classStudents = students.filter(s => s.student_class === className);
+              const classGrades = classStudents.flatMap(s => getStudentGrades(s.__backendId));
+              const avgGrade = calculateAverage(classGrades);
+              
+              return `
+                <div class="card-hover bg-white rounded-xl p-6 shadow-sm transition-all">
+                  <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-bold" style="color: ${config.text_color}">${className}</h3>
+                    <span class="px-3 py-1 rounded-full text-sm font-medium" style="background: ${config.primary_color}20; color: ${config.primary_color}">
+                      ${classStudents.length} alunos
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-4">
+                    <div class="flex-1">
+                      <p class="text-sm text-slate-500 mb-1">Média da Turma</p>
+                      <p class="text-2xl font-bold ${parseFloat(avgGrade) >= 7 ? 'text-emerald-600' : parseFloat(avgGrade) >= 5 ? 'text-amber-600' : 'text-red-600'}">${avgGrade}</p>
+                    </div>
+                    <div class="w-16 h-16 rounded-full flex items-center justify-center" style="background: ${config.primary_color}10">
+                      <svg class="w-8 h-8" style="color: ${config.primary_color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderGradesContent() {
+      const students = getStudents();
+      
+      return `
+        <div class="animate-fade">
+          <div class="mb-8">
+            <h2 class="text-2xl font-bold" style="color: ${config.text_color}">Gestão de Notas</h2>
+            <p class="text-slate-500">Lance notas para os alunos por disciplina e bimestre</p>
+          </div>
+
+          <div class="bg-white rounded-xl shadow-sm p-6">
+            <form id="bulk-grade-form" class="space-y-6">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-sm font-medium mb-2">Turma</label>
+                  <select id="bulk-class" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200">
+                    <option value="">Todas as turmas</option>
+                    ${CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Disciplina</label>
+                  <select id="bulk-subject" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200">
+                    <option value="">Selecione...</option>
+                    ${SUBJECTS.map(s => `<option value="${s}">${s}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Bimestre</label>
+                  <select id="bulk-bimester" class="input-field w-full px-4 py-3 rounded-lg border-2 border-slate-200">
+                    <option value="">Selecione...</option>
+                    ${BIMESTERS.map(b => `<option value="${b}">${b}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+
+              <div id="grade-list" class="space-y-3">
+                <p class="text-center text-slate-500 py-8">Selecione turma, disciplina e bimestre para lançar notas</p>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderReportsContent() {
+      const students = getStudents();
+      const grades = getGrades();
+      
+      return `
+        <div class="animate-fade">
+          <div class="mb-8">
+            <h2 class="text-2xl font-bold" style="color: ${config.text_color}">Relatórios</h2>
+            <p class="text-slate-500">Visualize relatórios e estatísticas da escola</p>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Performance by Class -->
+            <div class="bg-white rounded-xl shadow-sm p-6">
+              <h3 class="text-lg font-bold mb-4" style="color: ${config.text_color}">Desempenho por Turma</h3>
+              <div class="space-y-3">
+                ${CLASSES.slice(0, 6).map(className => {
+                  const classStudents = students.filter(s => s.student_class === className);
+                  const classGrades = classStudents.flatMap(s => getStudentGrades(s.__backendId));
+                  const avg = calculateAverage(classGrades);
+                  const percentage = (parseFloat(avg) / 10) * 100;
+                  
+                  return `
+                    <div>
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium" style="color: ${config.text_color}">${className}</span>
+                        <span class="text-sm font-bold ${parseFloat(avg) >= 7 ? 'text-emerald-600' : parseFloat(avg) >= 5 ? 'text-amber-600' : 'text-red-600'}">${avg}</span>
+                      </div>
+                      <div class="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full transition-all ${parseFloat(avg) >= 7 ? 'bg-emerald-500' : parseFloat(avg) >= 5 ? 'bg-amber-500' : 'bg-red-500'}" style="width: ${percentage}%"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
+            <!-- Performance by Subject -->
+            <div class="bg-white rounded-xl shadow-sm p-6">
+              <h3 class="text-lg font-bold mb-4" style="color: ${config.text_color}">Desempenho por Disciplina</h3>
+              <div class="space-y-3">
+                ${SUBJECTS.slice(0, 6).map(subject => {
+                  const subjectGrades = grades.filter(g => g.grade_subject === subject);
+                  const avg = calculateAverage(subjectGrades);
+                  const percentage = (parseFloat(avg) / 10) * 100;
+                  
+                  return `
+                    <div>
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium" style="color: ${config.text_color}">${subject}</span>
+                        <span class="text-sm font-bold ${parseFloat(avg) >= 7 ? 'text-emerald-600' : parseFloat(avg) >= 5 ? 'text-amber-600' : 'text-red-600'}">${avg}</span>
+                      </div>
+                      <div class="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full transition-all ${parseFloat(avg) >= 7 ? 'bg-emerald-500' : parseFloat(avg) >= 5 ? 'bg-amber-500' : 'bg-red-500'}" style="width: ${percentage}%"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTeacherDashboard() {
+      const students = getStudents().filter(s => currentUser.subject ? true : false);
+      
+      return `
+        <div class="flex h-full">
+          <!-- Sidebar -->
+          <aside class="w-64 flex-shrink-0 text-white" style="background: ${config.primary_color}">
+            <div class="p-6">
+              <div class="flex items-center gap-3 mb-2">
+                <div class="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h1 class="font-bold text-sm leading-tight">${config.school_name.substring(0, 20)}...</h1>
+                  <span class="text-xs text-white/70">${currentUser.subject}</span>
+                </div>
+              </div>
+            </div>
+            
+            <nav class="px-3 space-y-1">
+              <button data-view="teacher-home" class="sidebar-item ${currentView === 'teacher-home' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"></path></svg>
+                Minha Área
+              </button>
+              <button data-view="teacher-attendance" class="sidebar-item ${currentView === 'teacher-attendance' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Chamada
+              </button>
+              <button data-view="teacher-grades" class="sidebar-item ${currentView === 'teacher-grades' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                Notas
+              </button>
+              <button data-view="teacher-observations" class="sidebar-item ${currentView === 'teacher-observations' ? 'active' : ''} w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path></svg>
+                Observações
+              </button>
+            </nav>
+            
+            <div class="absolute bottom-0 left-0 w-64 p-4">
+              <div class="mb-4 p-3 rounded-lg bg-white/10">
+                <p class="text-sm text-white/70">Logado como</p>
+                <p class="font-medium text-xs">${currentUser.name}</p>
+              </div>
+              <button id="logout-btn" class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-white/10 hover:bg-white/20 transition-all">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                Sair
+              </button>
+            </div>
+          </aside>
+
+          <!-- Main Content -->
+          <main class="flex-1 overflow-auto p-6" style="background: ${config.secondary_color}">
+            ${renderTeacherContent()}
+          </main>
+        </div>
+      `;
+    }
+
+    function renderTeacherContent() {
+      if (currentView === 'teacher-attendance') {
+        return renderTeacherAttendance();
+      } else if (currentView === 'teacher-grades') {
+        return renderTeacherGrades();
+      } else if (currentView === 'teacher-observations') {
+        return renderTeacherObservations();
+      } else {
+        return renderTeacherHome();
+      }
+    }
+
+    function renderTeacherHome() {
+      const students = getStudents().filter(s => currentUser.subject ? true : false);
+      return `
+        <div class="animate-fade">
+          <div class="mb-8">
+            <h2 class="text-2xl font-bold" style="color: ${config.text_color}">Bem-vindo, ${currentUser.name}!</h2>
+            <p class="text-slate-500">Professor de ${currentUser.subject}</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="card-hover bg-white rounded-xl p-6 shadow-sm transition-all" style="border-left: 4px solid ${config.primary_color}">
+              <p class="text-slate-500 text-sm mb-1">Alunos</p>
+              <p class="text-3xl font-bold" style="color: ${config.text_color}">${students.length}</p>
+            </div>
+            <div class="card-hover bg-white rounded-xl p-6 shadow-sm transition-all" style="border-left: 4px solid #10b981">
+              <p class="text-slate-500 text-sm mb-1">Turmas</p>
+              <p class="text-3xl font-bold" style="color: ${config.text_color}">${CLASSES.length}</p>
+            </div>
+            <div class="card-hover bg-white rounded-xl p-6 shadow-sm transition-all" style="border-left: 4px solid ${config.accent_color}">
+              <p class="text-slate-500 text-sm mb-1">Disciplina</p>
+              <p class="text-xl font-bold" style="color: ${config.text_color}">${currentUser.subject}</p>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-xl shadow-sm p-6">
+            <h3 class="text-lg font-bold mb-4" style="color: ${config.text_color}">Ações Rápidas</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button data-view="teacher-attendance" class="p-4 border-2 border-slate-200 rounded-xl hover:border-emerald-400 hover:bg-emerald-50 transition-all text-left">
+                <div class="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center mb-3">
+                  <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                </div>
+                <h4 class="font-medium" style="color: ${config.text_color}">Fazer Chamada</h4>
+                <p class="text-sm text-slate-500">Registrar presença/ausência</p>
+              </button>
+              <button data-view="teacher-grades" class="p-4 border-2 border-slate-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all text-left">
+                <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center mb-3">
+                  <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                </div>
+                <h4 class="font-medium" style="color: ${config.text_color}">Lançar Notas</h4>
+                <p class="text-sm text-slate-500">Registrar notas e desempenho</p>
+              </button>
+              <button data-view="teacher-observations" class="p-4 border-2 border-slate-200 rounded-xl hover:border-purple-400 hover:bg-purple-50 transition-all text-left">
+                <div class="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center mb-3">
+                  <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path></svg>
+                </div>
+                <h4 class="font-medium" style="color: ${config.text_color}">Observações</h4>
+                <p class="text-sm text-slate-500">Adicionar observações</p>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTeacherAttendance() {
+      const students = getStudents();
+      const today = new Date().toISOString().split('T')[0];
+      
+      return `
+        <div class="animate-fade">
+          <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Chamada de Frequência</h2>
+          <p class="text-slate-500 mb-6">Registre a presença dos alunos</p>
+
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-sm font-medium mb-2">Turma</label>
+                  <select id="attendance-class-filter" class="input-field w-full px-4 py-2 rounded-lg border-2 border-slate-200 text-sm">
+                    <option value="">Todas as turmas</option>
+                    ${CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Data</label>
+                  <input type="date" id="attendance-date-filter" value="${today}" class="input-field w-full px-4 py-2 rounded-lg border-2 border-slate-200 text-sm">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Disciplina</label>
+                  <select id="attendance-subject-filter" class="input-field w-full px-4 py-2 rounded-lg border-2 border-slate-200 text-sm">
+                    <option value="${currentUser.subject}">${currentUser.subject}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div id="attendance-list" class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-slate-50">
+                  <tr>
+                    <th class="text-left py-3 px-6 text-sm font-medium text-slate-500">Aluno</th>
+                    <th class="text-center py-3 px-6 text-sm font-medium text-slate-500">Presença</th>
+                    <th class="text-center py-3 px-6 text-sm font-medium text-slate-500">Ação</th>
+                  </tr>
+                </thead>
+                <tbody id="attendance-table-body">
+                  ${students.length === 0 ? `
+                    <tr><td colspan="3" class="text-center py-8 text-slate-500">Nenhum aluno cadastrado</td></tr>
+                  ` : students.map(s => `
+                    <tr class="border-b border-slate-100 hover:bg-slate-50">
+                      <td class="py-3 px-6">
+                        <div class="flex items-center gap-3">
+                          <div class="w-8 h-8 rounded-full flex items-center justify-center font-medium text-white text-sm" style="background: ${config.primary_color}">
+                            ${s.student_name ? s.student_name.charAt(0).toUpperCase() : '?'}
+                          </div>
+                          <div>
+                            <p class="font-medium text-sm" style="color: ${config.text_color}">${s.student_name}</p>
+                            <p class="text-xs text-slate-500">${s.student_class}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="py-3 px-6 text-center">
+                        <span id="status-${s.__backendId}" class="px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">-</span>
+                      </td>
+                      <td class="py-3 px-6 text-center">
+                        <div class="flex gap-2 justify-center">
+                          <button class="mark-present px-3 py-1 rounded-lg text-xs font-medium text-white transition-all" style="background: #10b981" data-student-id="${s.__backendId}">✓ Presente</button>
+                          <button class="mark-absent px-3 py-1 rounded-lg text-xs font-medium text-white transition-all" style="background: #ef4444" data-student-id="${s.__backendId}">✗ Ausente</button>
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="p-4 border-t border-slate-200 flex gap-3 justify-end">
+              <button id="save-all-attendance" class="btn-primary px-6 py-2 rounded-lg text-white font-medium text-sm">
+                Salvar Chamada
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTeacherGrades() {
+      const students = getStudents();
+      const today = new Date().getFullYear().toString();
+      
+      return `
+        <div class="animate-fade">
+          <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Lançamento de Notas</h2>
+          <p class="text-slate-500 mb-6">Registre as notas dos alunos</p>
+
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-sm font-medium mb-2">Turma</label>
+                  <select id="grades-class-filter" class="input-field w-full px-4 py-2 rounded-lg border-2 border-slate-200 text-sm">
+                    <option value="">Todas as turmas</option>
+                    ${CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Bimestre</label>
+                  <select id="grades-bimester-filter" class="input-field w-full px-4 py-2 rounded-lg border-2 border-slate-200 text-sm">
+                    ${BIMESTERS.map(b => `<option value="${b}">${b}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-2">Disciplina</label>
+                  <select id="grades-subject-filter" class="input-field w-full px-4 py-2 rounded-lg border-2 border-slate-200 text-sm">
+                    <option value="${currentUser.subject}">${currentUser.subject}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div id="grades-list" class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-slate-50">
+                  <tr>
+                    <th class="text-left py-3 px-6 text-sm font-medium text-slate-500">Aluno</th>
+                    <th class="text-center py-3 px-6 text-sm font-medium text-slate-500">Nota</th>
+                    <th class="text-center py-3 px-6 text-sm font-medium text-slate-500">Status</th>
+                    <th class="text-center py-3 px-6 text-sm font-medium text-slate-500">Ação</th>
+                  </tr>
+                </thead>
+                <tbody id="grades-table-body">
+                  ${students.length === 0 ? `
+                    <tr><td colspan="4" class="text-center py-8 text-slate-500">Nenhum aluno cadastrado</td></tr>
+                  ` : students.map(s => {
+                    const existingGrade = getStudentGrades(s.__backendId).find(g => g.grade_subject === currentUser.subject && g.grade_bimester === BIMESTERS[0]);
+                    return `
+                      <tr class="border-b border-slate-100 hover:bg-slate-50">
+                        <td class="py-3 px-6">
+                          <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center font-medium text-white text-sm" style="background: ${config.primary_color}">
+                              ${s.student_name ? s.student_name.charAt(0).toUpperCase() : '?'}
+                            </div>
+                            <div>
+                              <p class="font-medium text-sm" style="color: ${config.text_color}">${s.student_name}</p>
+                              <p class="text-xs text-slate-500">${s.student_class}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td class="py-3 px-6 text-center">
+                          <input type="number" class="grade-input w-16 px-2 py-1 rounded-lg border-2 border-slate-200 text-center font-medium" 
+                            min="0" max="10" step="0.1" data-student-id="${s.__backendId}" 
+                            value="${existingGrade ? existingGrade.grade_value : ''}">
+                        </td>
+                        <td class="py-3 px-6 text-center">
+                          <span class="grade-status px-2 py-1 rounded-full text-xs font-medium" style="background: #f3f4f6; color: #6b7280;">-</span>
+                        </td>
+                        <td class="py-3 px-6 text-center">
+                          <button class="save-grade px-3 py-1 rounded-lg text-xs font-medium text-white transition-all btn-primary" data-student-id="${s.__backendId}">
+                            Salvar
+                          </button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTeacherObservations() {
+      const students = getStudents();
+      
+      return `
+        <div class="animate-fade">
+          <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}">Observações dos Alunos</h2>
+          <p class="text-slate-500 mb-6">Adicione observações sobre o desempenho e comportamento</p>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            ${students.length === 0 ? `
+              <div class="col-span-2 text-center py-12">
+                <p class="text-slate-500">Nenhum aluno cadastrado</p>
+              </div>
+            ` : students.map(s => {
+              const observations = allData.filter(d => d.type === 'observation' && d.observation_student_id === s.__backendId);
+              const lastObs = observations.length > 0 ? observations[observations.length - 1] : null;
+              
+              return `
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                  <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-10 h-10 rounded-full flex items-center justify-center font-medium text-white" style="background: ${config.primary_color}">
+                        ${s.student_name ? s.student_name.charAt(0).toUpperCase() : '?'}
+                      </div>
+                      <div>
+                        <p class="font-bold" style="color: ${config.text_color}">${s.student_name}</p>
+                        <p class="text-xs text-slate-500">${s.student_class}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  ${lastObs ? `
+                    <div class="mb-4 p-3 rounded-lg bg-slate-50 border-l-4" style="border-color: ${config.primary_color}">
+                      <p class="text-sm text-slate-600 mb-1">${lastObs.observation_text}</p>
+                      <p class="text-xs text-slate-400">${new Date(lastObs.observation_date).toLocaleDateString('pt-BR')}</p>
+                    </div>
+                  ` : ``}
+
+                  <textarea class="observation-input w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm resize-none" 
+                    rows="3" placeholder="Digite uma observação..." data-student-id="${s.__backendId}"></textarea>
+                  
+                  <button class="save-observation btn-primary w-full mt-3 px-4 py-2 rounded-lg text-white text-sm font-medium" 
+                    data-student-id="${s.__backendId}">
+                    Salvar Observação
+                  </button>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // ==================== EVENT LISTENERS ====================
+    function attachEventListeners() {
+      // Login form
+      const loginForm = document.getElementById('login-form');
+      if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+      }
+
+      // Setup admin button
+      const setupAdminBtn = document.getElementById('setup-admin-btn');
+      if (setupAdminBtn) {
+        setupAdminBtn.addEventListener('click', () => {
+          document.getElementById('setup-modal').classList.remove('hidden');
+        });
+      }
+
+      // Cancel setup
+      const cancelSetup = document.getElementById('cancel-setup');
+      if (cancelSetup) {
+        cancelSetup.addEventListener('click', () => {
+          document.getElementById('setup-modal').classList.add('hidden');
+        });
+      }
+
+      // Setup form
+      const setupForm = document.getElementById('setup-form');
+      if (setupForm) {
+        setupForm.addEventListener('submit', handleSetupAdmin);
+      }
+
+      // Logout
+      const logoutBtn = document.getElementById('logout-btn');
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+          currentUser = null;
+          currentView = 'login';
+          render();
+        });
+      }
+
+      // Sidebar navigation
+      document.querySelectorAll('[data-view]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          currentView = btn.dataset.view;
+          render();
+        });
+      });
+      document.querySelectorAll('.view-student-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          selectedStudent = btn.dataset.studentId;
+          currentView = 'student-detail';
+          render();
+        });
+      });
+
+      // Add student button
+      const addStudentBtn = document.getElementById('add-student-btn') || document.getElementById('add-student-btn-empty');
+      if (addStudentBtn) {
+        addStudentBtn.addEventListener('click', openStudentModal);
+      }
+
+      // Student form
+      const studentForm = document.getElementById('student-form');
+      if (studentForm) {
+        studentForm.addEventListener('submit', handleSaveStudent);
+      }
+
+      // Cancel student
+      const cancelStudent = document.getElementById('cancel-student');
+      if (cancelStudent) {
+        cancelStudent.addEventListener('click', () => {
+          document.getElementById('student-modal').classList.add('hidden');
+        });
+      }
+
+      // Edit student
+      document.querySelectorAll('.edit-student-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.editStudent;
+          openStudentModal(studentId);
+        });
+      });
+
+      // Delete student
+      document.querySelectorAll('.delete-student-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          handleDeleteStudent(btn.dataset.deleteStudent);
+        });
+      });
+
+      // Back to students
+      const backBtn = document.getElementById('back-to-students');
+      if (backBtn) {
+        backBtn.addEventListener('click', () => {
+          selectedStudent = null;
+          currentView = 'students';
+          render();
+        });
+      }
+
+      // Student tabs
+      document.querySelectorAll('.student-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.student-tab').forEach(t => {
+            t.classList.remove('active', 'border-blue-600', 'text-blue-600');
+            t.classList.add('border-transparent', 'text-slate-500');
+          });
+          tab.classList.add('active', 'border-blue-600', 'text-blue-600');
+          tab.classList.remove('border-transparent', 'text-slate-500');
+          
+          document.querySelectorAll('[id^="tab-"]').forEach(content => content.classList.add('hidden'));
+          document.getElementById(`tab-${tab.dataset.tab}`).classList.remove('hidden');
+        });
+      });
+
+      // Add grade button
+      const addGradeBtn = document.getElementById('add-grade-btn');
+      if (addGradeBtn) {
+        addGradeBtn.addEventListener('click', () => {
+          document.getElementById('grade-modal').classList.remove('hidden');
+        });
+      }
+
+      // Cancel grade
+      const cancelGrade = document.getElementById('cancel-grade');
+      if (cancelGrade) {
+        cancelGrade.addEventListener('click', () => {
+          document.getElementById('grade-modal').classList.add('hidden');
+        });
+      }
+
+      // Grade form
+      const gradeForm = document.getElementById('grade-form');
+      if (gradeForm) {
+        gradeForm.addEventListener('submit', handleSaveGrade);
+      }
+
+      // Add attendance button
+      const addAttendanceBtn = document.getElementById('add-attendance-btn');
+      if (addAttendanceBtn) {
+        addAttendanceBtn.addEventListener('click', () => {
+          document.getElementById('attendance-modal').classList.remove('hidden');
+        });
+      }
+
+      // Cancel attendance
+      const cancelAttendance = document.getElementById('cancel-attendance');
+      if (cancelAttendance) {
+        cancelAttendance.addEventListener('click', () => {
+          document.getElementById('attendance-modal').classList.add('hidden');
+        });
+      }
+
+      // Attendance form
+      const attendanceForm = document.getElementById('attendance-form');
+      if (attendanceForm) {
+        attendanceForm.addEventListener('submit', handleSaveAttendance);
+      }
+
+      // Document generation buttons
+      const genDeclaration = document.getElementById('gen-declaration');
+      if (genDeclaration) {
+        genDeclaration.addEventListener('click', () => prepareDocumentDownload('declaration'));
+      }
+
+      const genHistory = document.getElementById('gen-history');
+      if (genHistory) {
+        genHistory.addEventListener('click', () => prepareDocumentDownload('history'));
+      }
+
+      const genCertificate = document.getElementById('gen-certificate');
+      if (genCertificate) {
+        genCertificate.addEventListener('click', () => prepareDocumentDownload('certificate'));
+      }
+
+      const downloadWord = document.getElementById('download-word');
+      if (downloadWord) {
+        downloadWord.addEventListener('click', handleDownloadWord);
+      }
+
+      const downloadPdf = document.getElementById('download-pdf');
+      if (downloadPdf) {
+        downloadPdf.addEventListener('click', handleDownloadPdf);
+      }
+
+      const closeDownload = document.getElementById('close-download');
+      if (closeDownload) {
+        closeDownload.addEventListener('click', () => {
+          document.getElementById('download-modal').classList.add('hidden');
+        });
+      }
+
+      // Add teacher button
+      const addTeacherBtn = document.getElementById('add-teacher-btn');
+      if (addTeacherBtn) {
+        addTeacherBtn.addEventListener('click', openTeacherModal);
+      }
+
+      // Teacher form
+      const teacherForm = document.getElementById('teacher-form');
+      if (teacherForm) {
+        teacherForm.addEventListener('submit', handleSaveTeacher);
+      }
+
+      // Cancel teacher
+      const cancelTeacher = document.getElementById('cancel-teacher');
+      if (cancelTeacher) {
+        cancelTeacher.addEventListener('click', () => {
+          document.getElementById('teacher-modal').classList.add('hidden');
+        });
+      }
+
+      // Edit teacher
+      document.querySelectorAll('[data-edit-teacher]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          openTeacherModal(btn.dataset.editTeacher);
+        });
+      });
+
+      // Delete teacher
+      document.querySelectorAll('[data-delete-teacher]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          handleDeleteTeacher(btn.dataset.deleteTeacher);
+        });
+      });
+
+      // Bulk grade selects
+      const bulkClass = document.getElementById('bulk-class');
+      const bulkSubject = document.getElementById('bulk-subject');
+      const bulkBimester = document.getElementById('bulk-bimester');
+      
+      if (bulkClass && bulkSubject && bulkBimester) {
+        [bulkClass, bulkSubject, bulkBimester].forEach(select => {
+          select.addEventListener('change', updateGradeList);
+        });
+      }
+    }
+
+    // ==================== HANDLERS ====================
+    async function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+
+      const user = getUsers().find(u => u.email === email && u.password === password);
+      
+      if (user) {
+        currentUser = user;
+        currentView = user.role === 'admin' ? 'dashboard' : 'teacher-home';
+        render();
+        showToast(`Bem-vindo, ${user.name}!`);
+      } else {
+        showToast('Email ou senha incorretos', 'error');
+      }
+    }
+
+    async function handleSetupAdmin(e) {
+      e.preventDefault();
+      
+      const admins = getUsers().filter(u => u.role === 'admin');
+      if (admins.length > 0) {
+        showToast('Já existe um administrador cadastrado', 'error');
+        return;
+      }
+
+      const name = document.getElementById('setup-name').value;
+      const email = document.getElementById('setup-email').value;
+      const password = document.getElementById('setup-password').value;
+
+      const result = await window.dataSdk.create({
+        type: 'user',
+        name,
+        email,
+        password,
+        role: 'admin',
+        subject: ''
+      });
+
+      if (result.isOk) {
+        showToast('Administrador criado com sucesso!');
+        document.getElementById('setup-modal').classList.add('hidden');
+      } else {
+        showToast('Erro ao criar administrador', 'error');
+      }
+    }
+
+    function openStudentModal(studentId = null) {
+      const modal = document.getElementById('student-modal');
+      const title = document.getElementById('student-modal-title');
+      const form = document.getElementById('student-form');
+      
+      if (studentId) {
+        const student = getStudents().find(s => s.__backendId === studentId);
+        if (student) {
+          title.textContent = 'Editar Aluno';
+          document.getElementById('student-edit-id').value = studentId;
+          document.getElementById('student-name').value = student.student_name || '';
+          document.getElementById('student-class').value = student.student_class || '';
+          document.getElementById('student-birth').value = student.student_birth || '';
+          document.getElementById('student-cpf').value = student.student_cpf || '';
+          document.getElementById('student-phone').value = student.student_phone || '';
+          document.getElementById('student-address').value = student.student_address || '';
+          document.getElementById('student-status').value = student.student_status || 'Ativo';
+        }
+      } else {
+        title.textContent = 'Novo Aluno';
+        form.reset();
+        document.getElementById('student-edit-id').value = '';
+      }
+      
+      modal.classList.remove('hidden');
+    }
+
+    async function handleSaveStudent(e) {
+      e.preventDefault();
+      
+      if (allData.length >= 999) {
+        showToast('Limite máximo de registros atingido (999)', 'error');
+        return;
+      }
+
+      const editId = document.getElementById('student-edit-id').value;
+      const studentData = {
+        type: 'student',
+        student_name: document.getElementById('student-name').value,
+        student_class: document.getElementById('student-class').value,
+        student_birth: document.getElementById('student-birth').value,
+        student_cpf: document.getElementById('student-cpf').value,
+        student_phone: document.getElementById('student-phone').value,
+        student_address: document.getElementById('student-address').value,
+        student_status: document.getElementById('student-status').value
+      };
+
+      let result;
+      if (editId) {
+        const existing = allData.find(d => d.__backendId === editId);
+        result = await window.dataSdk.update({ ...existing, ...studentData });
+      } else {
+        result = await window.dataSdk.create(studentData);
+      }
+
+      if (result.isOk) {
+        showToast(editId ? 'Aluno atualizado!' : 'Aluno cadastrado!');
+        document.getElementById('student-modal').classList.add('hidden');
+      } else {
+        showToast('Erro ao salvar aluno', 'error');
+      }
+    }
+
+    async function handleDeleteStudent(studentId) {
+      const student = allData.find(d => d.__backendId === studentId);
+      if (!student) return;
+
+      // Create inline confirmation
+      const btn = document.querySelector(`[data-delete-student="${studentId}"]`);
+      if (btn.dataset.confirming) {
+        const result = await window.dataSdk.delete(student);
+        if (result.isOk) {
+          showToast('Aluno excluído!');
+        } else {
+          showToast('Erro ao excluir aluno', 'error');
+        }
+      } else {
+        btn.dataset.confirming = 'true';
+        btn.innerHTML = '<span class="text-xs">Confirmar?</span>';
+        btn.classList.add('bg-red-100');
+        setTimeout(() => {
+          btn.dataset.confirming = '';
+          btn.innerHTML = '<svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
+          btn.classList.remove('bg-red-100');
+        }, 3000);
+      }
+    }
+
+    async function handleSaveGrade(e) {
+      e.preventDefault();
+      
+      if (allData.length >= 999) {
+        showToast('Limite máximo de registros atingido', 'error');
+        return;
+      }
+
+      const result = await window.dataSdk.create({
+        type: 'grade',
+        grade_student_id: selectedStudent,
+        grade_subject: document.getElementById('grade-subject').value,
+        grade_bimester: document.getElementById('grade-bimester').value,
+        grade_value: parseFloat(document.getElementById('grade-value').value),
+        grade_year: new Date().getFullYear().toString()
+      });
+
+      if (result.isOk) {
+        showToast('Nota lançada!');
+        document.getElementById('grade-modal').classList.add('hidden');
+        document.getElementById('grade-form').reset();
+      } else {
+        showToast('Erro ao lançar nota', 'error');
+      }
+    }
+
+    async function handleSaveAttendance(e) {
+      e.preventDefault();
+      
+      if (allData.length >= 999) {
+        showToast('Limite máximo de registros atingido', 'error');
+        return;
+      }
+
+      const result = await window.dataSdk.create({
+        type: 'attendance',
+        attendance_student_id: selectedStudent,
+        attendance_date: document.getElementById('attendance-date').value,
+        attendance_subject: document.getElementById('attendance-subject').value,
+        attendance_present: document.getElementById('attendance-present').value === 'true'
+      });
+
+      if (result.isOk) {
+        showToast('Frequência registrada!');
+        document.getElementById('attendance-modal').classList.add('hidden');
+        document.getElementById('attendance-form').reset();
+      } else {
+        showToast('Erro ao registrar frequência', 'error');
+      }
+    }
+
+    async function generateDocument(docType) {
+      if (allData.length >= 999) {
+        showToast('Limite máximo de registros atingido', 'error');
+        return;
+      }
+
+      const result = await window.dataSdk.create({
+        type: 'document',
+        doc_student_id: selectedStudent,
+        doc_type: docType,
+        doc_content: '',
+        doc_date: new Date().toLocaleDateString('pt-BR'),
+        doc_downloaded: false
+      });
+
+      if (result.isOk) {
+        showToast(`${docType} gerado com sucesso!`);
+        render();
+      } else {
+        showToast('Erro ao gerar documento', 'error');
+      }
+    }
+
+    let pendingDocType = null;
+
+    function prepareDocumentDownload(docType) {
+      pendingDocType = docType;
+      const titles = {
+        'declaration': 'Baixar Declaração',
+        'history': 'Baixar Histórico',
+        'certificate': 'Baixar Certificado'
+      };
+      document.getElementById('download-title').textContent = titles[docType];
+      document.getElementById('download-modal').classList.remove('hidden');
+    }
+
+    function handleDownloadWord() {
+      generateAndDownloadDocument('word');
+    }
+
+    function handleDownloadPdf() {
+      generateAndDownloadDocument('pdf');
+    }
+
+    function generateAndDownloadDocument(format) {
+      const student = getStudents().find(s => s.__backendId === selectedStudent);
+      if (!student) {
+        showToast('Aluno não encontrado', 'error');
+        return;
+      }
+
+      const grades = getStudentGrades(student.__backendId);
+      const attendance = getStudentAttendance(student.__backendId);
+
+      let html = '';
+      let filename = '';
+
+      if (pendingDocType === 'declaration') {
+        html = generateDeclarationHTML(student);
+        filename = `Declaracao_${student.student_name}`;
+      } else if (pendingDocType === 'history') {
+        html = generateHistoryHTML(student, grades);
+        filename = `Historico_${student.student_name}`;
+      } else if (pendingDocType === 'certificate') {
+        html = generateCertificateHTML(student, grades);
+        filename = `Certificado_${student.student_name}`;
+      }
+
+      if (format === 'word') {
+        downloadAsWord(html, filename);
+      } else {
+        downloadAsPDF(html, filename);
+      }
+
+      document.getElementById('download-modal').classList.add('hidden');
+    }
+
+    function generateDeclarationHTML(student) {
+      return `
+        <h1 style="text-align: center; color: #1e40af; margin-bottom: 10px;">${config.declaration_header}</h1>
+        <div style="text-align: center; margin-bottom: 20px; font-weight: bold; color: #333;">
+          ${config.school_name}
+        </div>
+        <hr style="border: 1px solid #1e40af;">
+        <p><strong>Escola:</strong> ${config.school_name}</p>
+        <p><strong>Endereço:</strong> ${config.school_address}</p>
+        <p><strong>Telefone:</strong> ${config.school_phone}</p>
+        <hr>
+        <p>Declaramos, para os devidos fins, que <strong>${student.student_name}</strong>, portador(a) do CPF nº ${student.student_cpf || '___.___.___-__'}, 
+        nascido(a) em ${student.student_birth || '__/__/____'}, está devidamente matriculado(a) nesta instituição, 
+        no ano letivo atual, na turma <strong>${student.student_class}</strong>.</p>
+        
+        <p>Esta declaração é expedida para fins de ${student.student_status === 'Ativo' ? 'matrícula e transferência' : 'transferência'} e tem validade de 30 dias a partir da data de emissão.</p>
+        
+        <div class="signature" style="margin-top: 60px;">
+          <div class="signature-line">
+            <p style="margin-bottom: 40px;">_____________________________</p>
+            <p><strong>Direção da Escola</strong></p>
+            <p style="font-size: 12px;">${new Date().toLocaleDateString('pt-BR')}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function generateHistoryHTML(student, grades) {
+      const gradesBySubject = {};
+      SUBJECTS.forEach(subject => {
+        gradesBySubject[subject] = {};
+        BIMESTERS.forEach(bim => {
+          const grade = grades.find(g => g.grade_subject === subject && g.grade_bimester === bim);
+          gradesBySubject[subject][bim] = grade ? grade.grade_value : '-';
+        });
+      });
+
+      let historyTable = '<table><tr><th>Disciplina</th>';
+      BIMESTERS.forEach(b => historyTable += `<th>${b}</th>`);
+      historyTable += '<th>Média</th></tr>';
+
+      SUBJECTS.forEach(subject => {
+        const subjectGrades = Object.values(gradesBySubject[subject]).filter(g => g !== '-');
+        const avg = subjectGrades.length > 0 ? (subjectGrades.reduce((a, b) => a + b, 0) / subjectGrades.length).toFixed(1) : '-';
+        historyTable += `<tr><td>${subject}</td>`;
+        BIMESTERS.forEach(bim => {
+          historyTable += `<td>${gradesBySubject[subject][bim]}</td>`;
+        });
+        historyTable += `<td><strong>${avg}</strong></td></tr>`;
+      });
+      historyTable += '</table>';
+
+      return `
+        <h1>${config.history_header}</h1>
+        <hr>
+        <p><strong>Escola:</strong> ${config.school_name}</p>
+        <p><strong>Aluno:</strong> ${student.student_name}</p>
+        <p><strong>Turma:</strong> ${student.student_class}</p>
+        <p><strong>Período:</strong> Ano Letivo ${new Date().getFullYear()}</p>
+        <hr>
+        <h2>Desempenho Acadêmico</h2>
+        ${historyTable}
+        <p style="margin-top: 30px; font-size: 12px;"><em>Documento emitido em ${new Date().toLocaleDateString('pt-BR')}</em></p>
+      `;
+    }
+
+    function generateCertificateHTML(student, grades) {
+      const avgGrade = calculateAverage(grades);
+      const status = parseFloat(avgGrade) >= 7 ? 'APROVADO(A)' : 'REPROVADO(A)';
+      const statusColor = parseFloat(avgGrade) >= 7 ? '#10b981' : '#ef4444';
+
+      return `
+        <div style="border: 3px solid #1e40af; padding: 40px; border-radius: 10px;">
+          <h1 style="color: #1e40af; text-align: center; font-size: 32px;">${config.certificate_header}</h1>
+          <hr style="border: 2px solid #1e40af;">
+          
+          <p style="text-align: center; font-size: 16px; margin-top: 30px;">
+            Certificamos que <strong>${student.student_name}</strong>, devidamente matriculado(a) nesta instituição, 
+            completou com êxito o período letivo correspondente à turma <strong>${student.student_class}</strong>.
+          </p>
+          
+          <p style="text-align: center; font-size: 14px; margin-top: 20px;">
+            <strong>Média Final:</strong> ${calculateAverage(grades)} <br>
+            <strong>Status:</strong> <span style="color: ${statusColor}; font-weight: bold; font-size: 18px;">${status}</span>
+          </p>
+          
+          <p style="text-align: center; font-size: 12px; margin-top: 40px; font-style: italic;">
+            Este certificado é válido como comprovante de conclusão do período letivo.
+          </p>
+          
+          <div class="signature" style="margin-top: 80px; display: flex; justify-content: space-around;">
+            <div style="text-align: center;">
+              <p style="margin-bottom: 40px; border-bottom: 1px solid #000; width: 150px;"></p>
+              <p><strong>Diretor(a)</strong></p>
+            </div>
+            <div style="text-align: center;">
+              <p style="margin-bottom: 40px; border-bottom: 1px solid #000; width: 150px;"></p>
+              <p><strong>Secretário(a)</strong></p>
+            </div>
+          </div>
+          
+          <p style="text-align: center; margin-top: 40px; font-size: 11px;">
+            Emitido em ${new Date().toLocaleDateString('pt-BR')} | Validade: 01 ano
+          </p>
+        </div>
+      `;
+    }
+
+    function openTeacherModal(teacherId = null) {
+      const modal = document.getElementById('teacher-modal');
+      const title = document.getElementById('teacher-modal-title');
+      const form = document.getElementById('teacher-form');
+      
+      if (teacherId) {
+        const teacher = getUsers().find(u => u.__backendId === teacherId);
+        if (teacher) {
+          title.textContent = 'Editar Professor';
+          document.getElementById('teacher-edit-id').value = teacherId;
+          document.getElementById('teacher-name').value = teacher.name || '';
+          document.getElementById('teacher-email').value = teacher.email || '';
+          document.getElementById('teacher-password').value = teacher.password || '';
+          document.getElementById('teacher-subject').value = teacher.subject || '';
+        }
+      } else {
+        title.textContent = 'Novo Professor';
+        form.reset();
+        document.getElementById('teacher-edit-id').value = '';
+      }
+      
+      modal.classList.remove('hidden');
+    }
+
+    async function handleSaveTeacher(e) {
+      e.preventDefault();
+      
+      if (allData.length >= 999) {
+        showToast('Limite máximo de registros atingido', 'error');
+        return;
+      }
+
+      const editId = document.getElementById('teacher-edit-id').value;
+      const teacherData = {
+        type: 'user',
+        name: document.getElementById('teacher-name').value,
+        email: document.getElementById('teacher-email').value,
+        password: document.getElementById('teacher-password').value,
+        role: 'teacher',
+        subject: document.getElementById('teacher-subject').value
+      };
+
+      let result;
+      if (editId) {
+        const existing = allData.find(d => d.__backendId === editId);
+        result = await window.dataSdk.update({ ...existing, ...teacherData });
+      } else {
+        result = await window.dataSdk.create(teacherData);
+      }
+
+      if (result.isOk) {
+        showToast(editId ? 'Professor atualizado!' : 'Professor cadastrado!');
+        document.getElementById('teacher-modal').classList.add('hidden');
+      } else {
+        showToast('Erro ao salvar professor', 'error');
+      }
+    }
+
+    async function handleDeleteTeacher(teacherId) {
+      const teacher = allData.find(d => d.__backendId === teacherId);
+      if (!teacher) return;
+
+      const result = await window.dataSdk.delete(teacher);
+      if (result.isOk) {
+        showToast('Professor excluído!');
+      } else {
+        showToast('Erro ao excluir professor', 'error');
+      }
+    }
+
+    // ==================== TEACHER PORTAL HANDLERS ====================
+    let teacherAttendanceData = {};
+
+    function markAttendance(studentId, isPresent) {
+      if (!teacherAttendanceData[studentId]) {
+        teacherAttendanceData[studentId] = isPresent;
+      } else {
+        teacherAttendanceData[studentId] = isPresent;
+      }
+
+      const statusSpan = document.getElementById(`status-${studentId}`);
+      if (statusSpan) {
+        if (isPresent) {
+          statusSpan.textContent = 'Presente';
+          statusSpan.className = 'px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700';
+        } else {
+          statusSpan.textContent = 'Ausente';
+          statusSpan.className = 'px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700';
+        }
+      }
+    }
+
+    async function handleSaveAllAttendance() {
+      const date = document.getElementById('attendance-date-filter').value;
+      const subject = document.getElementById('attendance-subject-filter').value;
+      
+      if (!date || !subject) {
+        showToast('Selecione data e disciplina', 'error');
+        return;
+      }
+
+      if (Object.keys(teacherAttendanceData).length === 0) {
+        showToast('Marque a presença de pelo menos um aluno', 'error');
+        return;
+      }
+
+      let saved = 0;
+      for (const [studentId, isPresent] of Object.entries(teacherAttendanceData)) {
+        const existingAttendance = allData.find(d => 
+          d.type === 'attendance' && 
+          d.attendance_student_id === studentId && 
+          d.attendance_date === date &&
+          d.attendance_subject === subject
+        );
+
+        let result;
+        if (existingAttendance) {
+          result = await window.dataSdk.update({ ...existingAttendance, attendance_present: isPresent });
+        } else {
+          if (allData.length >= 999) {
+            showToast('Limite máximo de registros atingido', 'error');
+            return;
+          }
+          result = await window.dataSdk.create({
+            type: 'attendance',
+            attendance_student_id: studentId,
+            attendance_date: date,
+            attendance_subject: subject,
+            attendance_present: isPresent
+          });
+        }
+
+        if (result.isOk) saved++;
+      }
+
+      if (saved > 0) {
+        showToast(`${saved} registro(s) de frequência salvo(s)!`);
+        teacherAttendanceData = {};
+        render();
+      } else {
+        showToast('Erro ao salvar frequência', 'error');
+      }
+    }
+
+    async function saveTeacherGrade(studentId, value) {
+      if (value < 0 || value > 10) {
+        showToast('Nota deve ser entre 0 e 10', 'error');
+        return;
+      }
+
+      const bimester = document.getElementById('grades-bimester-filter').value;
+      const subject = currentUser.subject;
+
+      const existingGrade = getStudentGrades(studentId).find(g => 
+        g.grade_subject === subject && g.grade_bimester === bimester
+      );
+
+      let result;
+      if (existingGrade) {
+        result = await window.dataSdk.update({ ...existingGrade, grade_value: value });
+      } else {
+        if (allData.length >= 999) {
+          showToast('Limite máximo de registros atingido', 'error');
+          return;
+        }
+        result = await window.dataSdk.create({
+          type: 'grade',
+          grade_student_id: studentId,
+          grade_subject: subject,
+          grade_bimester: bimester,
+          grade_value: value,
+          grade_year: new Date().getFullYear().toString()
+        });
+      }
+
+      if (result.isOk) {
+        showToast('Nota salva com sucesso!');
+        const statusSpan = document.querySelector(`.grade-status[data-student-id="${studentId}"]`);
+        if (statusSpan) {
+          if (value >= 7) {
+            statusSpan.textContent = 'Aprovado';
+            statusSpan.style.background = '#dbeafe';
+            statusSpan.style.color = '#0369a1';
+          } else if (value >= 5) {
+            statusSpan.textContent = 'Atenção';
+            statusSpan.style.background = '#fed7aa';
+            statusSpan.style.color = '#b45309';
+          } else {
+            statusSpan.textContent = 'Reprovado';
+            statusSpan.style.background = '#fee2e2';
+            statusSpan.style.color = '#dc2626';
+          }
+        }
+      } else {
+        showToast('Erro ao salvar nota', 'error');
+      }
+    }
+
+    async function saveObservation(studentId, text) {
+      if (allData.length >= 999) {
+        showToast('Limite máximo de registros atingido', 'error');
+        return;
+      }
+
+      const result = await window.dataSdk.create({
+        type: 'observation',
+        observation_student_id: studentId,
+        observation_text: text,
+        observation_date: new Date().toISOString()
+      });
+
+      if (result.isOk) {
+        showToast('Observação salva com sucesso!');
+        render();
+      } else {
+        showToast('Erro ao salvar observação', 'error');
+      }
+    }
+
+    function updateGradeList() {
+      const classValue = document.getElementById('bulk-class').value;
+      const subject = document.getElementById('bulk-subject').value;
+      const bimester = document.getElementById('bulk-bimester').value;
+      
+      const gradeList = document.getElementById('grade-list');
+      
+      if (!subject || !bimester) {
+        gradeList.innerHTML = '<p class="text-center text-slate-500 py-8">Selecione disciplina e bimestre para lançar notas</p>';
+        return;
+      }
+
+      let students = getStudents();
+      if (classValue) {
+        students = students.filter(s => s.student_class === classValue);
+      }
+
+      if (students.length === 0) {
+        gradeList.innerHTML = '<p class="text-center text-slate-500 py-8">Nenhum aluno encontrado</p>';
+        return;
+      }
+
+      gradeList.innerHTML = students.map(s => {
+        const existingGrade = getStudentGrades(s.__backendId).find(g => g.grade_subject === subject && g.grade_bimester === bimester);
+        return `
+          <div class="flex items-center gap-4 p-3 bg-slate-50 rounded-lg">
+            <div class="flex-1">
+              <p class="font-medium" style="color: ${config.text_color}">${s.student_name}</p>
+              <p class="text-sm text-slate-500">${s.student_class}</p>
+            </div>
+            <input type="number" min="0" max="10" step="0.1" 
+              class="bulk-grade-input w-24 px-3 py-2 rounded-lg border-2 border-slate-200 text-center font-medium"
+              data-student-id="${s.__backendId}"
+              data-subject="${subject}"
+              data-bimester="${bimester}"
+              value="${existingGrade ? existingGrade.grade_value : ''}"
+              placeholder="0-10">
+            <button class="save-bulk-grade btn-primary px-4 py-2 rounded-lg text-white text-sm font-medium" data-student-id="${s.__backendId}">
+              Salvar
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      // Attach save handlers
+      document.querySelectorAll('.save-bulk-grade').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const studentId = btn.dataset.studentId;
+          const input = document.querySelector(`.bulk-grade-input[data-student-id="${studentId}"]`);
+          const value = parseFloat(input.value);
+          
+          if (isNaN(value) || value < 0 || value > 10) {
+            showToast('Nota deve ser entre 0 e 10', 'error');
+            return;
+          }
+
+          const existingGrade = getStudentGrades(studentId).find(g => 
+            g.grade_subject === input.dataset.subject && g.grade_bimester === input.dataset.bimester
+          );
+
+          let result;
+          if (existingGrade) {
+            result = await window.dataSdk.update({ ...existingGrade, grade_value: value });
+          } else {
+            if (allData.length >= 999) {
+              showToast('Limite máximo de registros atingido', 'error');
+              return;
+            }
+            result = await window.dataSdk.create({
+              type: 'grade',
+              grade_student_id: studentId,
+              grade_subject: input.dataset.subject,
+              grade_bimester: input.dataset.bimester,
+              grade_value: value,
+              grade_year: new Date().getFullYear().toString()
+            });
+          }
+
+          if (result.isOk) {
+            showToast('Nota salva!');
+            btn.textContent = '✓';
+            setTimeout(() => btn.textContent = 'Salvar', 1500);
+          } else {
+            showToast('Erro ao salvar nota', 'error');
+          }
+        });
+      });
+
+      // Teacher attendance handlers
+      const saveAllAttendance = document.getElementById('save-all-attendance');
+      if (saveAllAttendance) {
+        saveAllAttendance.addEventListener('click', handleSaveAllAttendance);
+      }
+
+      document.querySelectorAll('.mark-present').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.studentId;
+          markAttendance(studentId, true);
+        });
+      });
+
+      document.querySelectorAll('.mark-absent').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.studentId;
+          markAttendance(studentId, false);
+        });
+      });
+
+      // Teacher grades handlers
+      document.querySelectorAll('.save-grade').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.studentId;
+          const input = document.querySelector(`.grade-input[data-student-id="${studentId}"]`);
+          if (input && input.value) {
+            saveTeacherGrade(studentId, parseFloat(input.value));
+          }
+        });
+      });
+
+      // Teacher observations handlers
+      document.querySelectorAll('.save-observation').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.studentId;
+          const textarea = document.querySelector(`.observation-input[data-student-id="${studentId}"]`);
+          if (textarea && textarea.value.trim()) {
+            saveObservation(studentId, textarea.value.trim());
+          } else {
+            showToast('Digite uma observação', 'error');
+          }
+        });
+      });
+    }
+
+    // ==================== ELEMENT SDK ====================
+    if (window.elementSdk) {
+      window.elementSdk.init({
+        defaultConfig,
+        onConfigChange: async (newConfig) => {
+          config = { ...defaultConfig, ...newConfig };
+          
+          const schoolNameDisplay = document.getElementById('school-name-display');
+          if (schoolNameDisplay) schoolNameDisplay.textContent = config.school_name;
+          
+          const schoolSloganDisplay = document.getElementById('school-slogan-display');
+          if (schoolSloganDisplay) schoolSloganDisplay.textContent = config.school_slogan;
+          
+          const sidebarSchoolName = document.getElementById('sidebar-school-name');
+          if (sidebarSchoolName) sidebarSchoolName.textContent = config.school_name;
+        },
+        mapToCapabilities: (cfg) => ({
+          recolorables: [
+            {
+              get: () => cfg.primary_color || defaultConfig.primary_color,
+              set: (v) => { cfg.primary_color = v; window.elementSdk.setConfig({ primary_color: v }); }
+            },
+            {
+              get: () => cfg.secondary_color || defaultConfig.secondary_color,
+              set: (v) => { cfg.secondary_color = v; window.elementSdk.setConfig({ secondary_color: v }); }
+            },
+            {
+              get: () => cfg.text_color || defaultConfig.text_color,
+              set: (v) => { cfg.text_color = v; window.elementSdk.setConfig({ text_color: v }); }
+            },
+            {
+              get: () => cfg.accent_color || defaultConfig.accent_color,
+              set: (v) => { cfg.accent_color = v; window.elementSdk.setConfig({ accent_color: v }); }
+            }
+          ],
+          borderables: [],
+          fontEditable: undefined,
+          fontSizeable: undefined
+        }),
+        mapToEditPanelValues: (cfg) => new Map([
+          ['school_name', cfg.school_name || defaultConfig.school_name],
+          ['school_address', cfg.school_address || defaultConfig.school_address],
+          ['school_phone', cfg.school_phone || defaultConfig.school_phone],
+          ['declaration_header', cfg.declaration_header || defaultConfig.declaration_header],
+          ['certificate_header', cfg.certificate_header || defaultConfig.certificate_header],
+          ['history_header', cfg.history_header || defaultConfig.history_header]
+        ])
+      });
+
+      // Teacher attendance handlers
+      const saveAllAttendance = document.getElementById('save-all-attendance');
+      if (saveAllAttendance) {
+        saveAllAttendance.addEventListener('click', handleSaveAllAttendance);
+      }
+
+      document.querySelectorAll('.mark-present').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.studentId;
+          markAttendance(studentId, true);
+        });
+      });
+
+      document.querySelectorAll('.mark-absent').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.studentId;
+          markAttendance(studentId, false);
+        });
+      });
+
+      // Teacher grades handlers
+      document.querySelectorAll('.save-grade').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.studentId;
+          const input = document.querySelector(`.grade-input[data-student-id="${studentId}"]`);
+          if (input && input.value) {
+            saveTeacherGrade(studentId, parseFloat(input.value));
+          }
+        });
+      });
+
+      // Teacher observations handlers
+      document.querySelectorAll('.save-observation').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const studentId = btn.dataset.studentId;
+          const textarea = document.querySelector(`.observation-input[data-student-id="${studentId}"]`);
+          if (textarea && textarea.value.trim()) {
+            saveObservation(studentId, textarea.value.trim());
+          } else {
+            showToast('Digite uma observação', 'error');
+          }
+        });
+      });
+    }
+
+    // ==================== DATA SDK ====================
+    const dataHandler = {
+      onDataChanged(data) {
+        allData = data;
+        render();
+      }
+    };
+
+    async function init() {
+      const result = await window.dataSdk.init(dataHandler);
+      if (!result.isOk) {
+        console.error('Failed to initialize Data SDK');
+      }
+      render();
+    }
+
+    init();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9d9bfbdda390492b',t:'MTc3MzA3OTI3NS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
